@@ -1,6 +1,6 @@
 /* Duet service worker — offline shell, static cache, opaque push. */
 
-const VERSION = 'duet-2026-11-16';
+const VERSION = 'duet-2026-11-17.1';
 const SHELL_CACHE = `${VERSION}-shell`;
 const RUNTIME_CACHE = `${VERSION}-runtime`;
 
