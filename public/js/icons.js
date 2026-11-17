@@ -5,10 +5,6 @@ import { h } from './preact.js';
  * 24px grid so the UI keeps one optical weight.
  */
 const PATHS = {
-  logo: [
-    ['path', { d: 'M8.4 6.2A5.8 5.8 0 0 0 3 11.9c0 2 .9 3.7 2.4 4.9V21l4.1-2.1a6.4 6.4 0 0 0 2.5.5c3.5 0 6.4-2.8 6.4-6.2S15.5 7 12 7a7 7 0 0 0-3.6.9' }],
-    ['path', { d: 'M18.4 13.2a5.3 5.3 0 0 1-1.2 3.3V20l-3-1.5a5.6 5.6 0 0 1-2 .3c-2.2 0-4.1-1.2-5.1-3' }]
-  ],
   lock: [
     ['rect', { x: 4.5, y: 10.5, width: 15, height: 10, rx: 2.5 }],
     ['path', { d: 'M8 10.5V7.8a4 4 0 0 1 8 0v2.7' }],
@@ -256,10 +252,49 @@ export function Icon({ name, size = 20, className = '', strokeWidth = 1.7, ...re
   );
 }
 
+let logoSeq = 0;
+
+/**
+ * The Duet brand mark — the same artwork as the installed app icon, drawn as
+ * inline SVG so it stays sharp at every size and needs no image request.
+ */
 export function LogoMark({ size = 34, className = '' }) {
+  const id = `duet-mark-${++logoSeq}`;
   return h(
-    'span',
-    { class: `logo-mark ${className}`.trim(), style: { width: `${size}px`, height: `${size}px` } },
-    h(Icon, { name: 'logo', size: Math.round(size * 0.62), strokeWidth: 1.8 })
+    'svg',
+    {
+      class: `logo-mark ${className}`.trim(),
+      width: size,
+      height: size,
+      viewBox: '0 0 64 64',
+      'aria-hidden': 'true',
+      focusable: 'false'
+    },
+    [
+      h('defs', {}, [
+        h('linearGradient', { id: `${id}-plate`, x1: '0', y1: '0', x2: '1', y2: '1' }, [
+          h('stop', { offset: '0', 'stop-color': '#F9FAFE' }),
+          h('stop', { offset: '.55', 'stop-color': '#ECEEF6' }),
+          h('stop', { offset: '1', 'stop-color': '#DDE0EE' })
+        ]),
+        h('linearGradient', { id: `${id}-violet`, x1: '0', y1: '0', x2: '1', y2: '1' }, [
+          h('stop', { offset: '0', 'stop-color': '#7A47FF' }),
+          h('stop', { offset: '1', 'stop-color': '#6130E8' })
+        ])
+      ]),
+      h('rect', { width: 64, height: 64, rx: 16, fill: `url(#${id}-plate)` }),
+      h('rect', {
+        x: 11.5, y: 13.5, width: 21, height: 37, rx: 7.5,
+        fill: '#FFFFFF', stroke: '#1A1C2E', 'stroke-opacity': '.07', 'stroke-width': '.75'
+      }),
+      h('path', {
+        fill: `url(#${id}-violet)`,
+        d: 'M33 13h8a17 17 0 0 1 0 34h-4l-3.6 5.2L30 47h-2.5z'
+      }),
+      h('path', { fill: '#15161F', d: 'M23 32 30 24.5h8.5a8.75 8.75 0 0 1 0 17.5H30Z' }),
+      h('circle', { cx: 28.2, cy: 33.2, r: 1.9, fill: '#7A47FF' }),
+      h('circle', { cx: 33.6, cy: 33.2, r: 1.9, fill: '#FFFFFF' }),
+      h('circle', { cx: 39, cy: 33.2, r: 1.9, fill: '#7A47FF' })
+    ]
   );
 }
