@@ -1,6 +1,6 @@
 /* Duet service worker — offline shell, static cache, opaque push. */
 
-const VERSION = 'duet-2026-11-17.1';
+const VERSION = 'duet-2026-11-19.1';
 const SHELL_CACHE = `${VERSION}-shell`;
 const RUNTIME_CACHE = `${VERSION}-runtime`;
 
@@ -100,8 +100,31 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  event.respondWith(staleWhileRevalidate(request));
+  // App code (js/css/html) is network-first so a new deploy takes effect on the
+  // very next load. Stale-while-revalidate kept running the OLD code once.
+  // Vendor libraries are versioned and immutable, so a cache hit is fine.
+  if (url.pathname.startsWith('/vendor/') || url.pathname.startsWith('/icons/')) {
+    event.respondWith(staleWhileRevalidate(request));
+    return;
+  }
+  event.respondWith(networkFirst(request));
 });
+
+async function networkFirst(request) {
+  const cache = await caches.open(RUNTIME_CACHE);
+  try {
+    const response = await fetch(request, { cache: 'no-cache' });
+    if (response.ok) cache.put(request, response.clone()).catch(() => {});
+    return response;
+  } catch {
+    const cached = await cache.match(request);
+    if (cached) return cached;
+    const shell = await caches.open(SHELL_CACHE);
+    const fallback = await shell.match(request);
+    if (fallback) return fallback;
+    return new Response('Offline', { status: 503, headers: { 'Content-Type': 'text/plain' } });
+  }
+}
 
 async function networkFirstNavigation(request) {
   const cache = await caches.open(SHELL_CACHE);
