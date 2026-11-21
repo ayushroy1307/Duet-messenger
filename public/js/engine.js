@@ -17,6 +17,10 @@ export class EngineError extends Error {
   }
 }
 
+// Sessions created before this format carried a wrong initiator root key and
+// can never decrypt replies. They are discarded and re-established on attach.
+const SESSION_FORMAT = 2;
+
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const now = () => new Date().toISOString();
 
@@ -176,6 +180,27 @@ export class DuetEngine {
     this.userId = vault.userId;
     this.locks = new Map();
     this.workQueues = new Map();
+    this.migrateLegacySessions();
+  }
+
+  /**
+   * Initiator sessions made by the old buggy build (no `v`) are unusable:
+   * the peer's replies never decrypt and the chat sits on "Securing...".
+   * Drop them so the next time the chat opens a fresh handshake is sent.
+   */
+  migrateLegacySessions() {
+    const ks = this.keystore;
+    if (!ks?.sessions) return;
+    let changed = false;
+    for (const [conversationId, session] of Object.entries(ks.sessions)) {
+      if (session?.initiator && session.v !== SESSION_FORMAT) {
+        this.retire(conversationId, session.generation);
+        delete ks.sessions[conversationId];
+        changed = true;
+        diag.event('session_reset', { conversationId, reason: 'legacy_format' });
+      }
+    }
+    if (changed) void this.persist().catch(() => {});
   }
 
   detach() {
@@ -331,9 +356,10 @@ export class DuetEngine {
     const session = {
       generation,
       peerId,
+      v: SESSION_FORMAT,
       initiator: true,
       ad,
-      rootKey: b64(sk),
+      rootKey: step.rootKey,
       dhSelfPriv: dhSelf.priv,
       dhSelfPub: dhSelf.pub,
       dhRemotePub: signedPreKey.publicKey,
@@ -475,6 +501,7 @@ export class DuetEngine {
     const session = {
       generation: x3dh.generation,
       peerId,
+      v: SESSION_FORMAT,
       initiator: false,
       ad,
       rootKey: b64(sk),
