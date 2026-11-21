@@ -146,6 +146,29 @@ export async function serveStatic(req, res, url) {
     return;
   }
 
+  // The service worker's cache name follows the build tag (a hash of every
+  // server and public file), so each GitHub push -> Render deploy gives
+  // browsers a fresh cache automatically. No manual version bump needed.
+  if (pathname === '/sw.js') {
+    try {
+      const source = await fs.readFile(path.join(config.publicDir, 'sw.js'), 'utf8');
+      const body = Buffer.from(source.replace(
+        /const VERSION = '[^']*';/,
+        `const VERSION = 'duet-${config.buildTag}';`
+      ));
+      res.writeHead(200, {
+        'Content-Type': MIME['.js'],
+        'Content-Length': body.length,
+        'Cache-Control': 'no-cache, no-store, must-revalidate'
+      });
+      if (req.method === 'HEAD') res.end();
+      else res.end(body);
+    } catch {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Not found');
+    }
+    return;
+  }
+
   const safe = path.normalize(pathname).replace(/^(\.\.[/\\])+/, '');
   const full = path.join(config.publicDir, safe);
   if (!full.startsWith(config.publicDir + path.sep) && full !== config.publicDir) {
