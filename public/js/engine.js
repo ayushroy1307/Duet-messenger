@@ -446,6 +446,14 @@ export class DuetEngine {
       }
       throw error;
     }
+    // If peer bundle not available yet (cold start race), wait once and retry.
+    // This handles the case where the initiator's publishKeys() hasn't completed
+    // by the time the handshake message arrives at the recipient.
+    if (!peerBundle?.identityKey) {
+      await new Promise(r => setTimeout(r, 1500));
+      const retry = await api.keys(conversationId);
+      peerBundle = retry?.bundle || null;
+    }
     // Pin the peer's identity. X3DH authenticates the initiator, and the
     // handshake must also match the identity the server publishes for them.
     if (!peerBundle?.identityKey || peerBundle.identityKey !== x3dh.initiatorIdentityKey) {
@@ -455,7 +463,7 @@ export class DuetEngine {
         peerId
       });
       throw new EngineError('identity_mismatch',
-        'The secure session did not match this contact’s identity key.');
+        'The secure session did not match this contact\'s identity key.');
     }
     if (!verifySessionInit(x3dh)) {
       diag.event('session_refused', {
@@ -629,6 +637,7 @@ export class DuetEngine {
     } catch (error) {
       const reason = error?.code || 'decrypt_failed';
       const transient = ['offline', 'timeout', 'store_unreachable', 'keys_unavailable'].includes(reason);
+      // keys_unavailable is now retryable (not dead) - peer may be publishing keys
       const dead = [
         'prekey_gone', 'spk_gone', 'retired_generation', 'identity_mismatch',
         'bad_signature', 'bad_payload', 'missing_key', 'old_chain'
