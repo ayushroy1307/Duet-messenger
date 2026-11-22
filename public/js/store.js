@@ -871,6 +871,19 @@ export async function materializeRow(row) {
     peerId: state.active.peer?.id,
     variant
   });
+  // If this message failed with a retryable error, schedule a retry
+  if (decoded.status === 'damaged' && decoded.retryable) {
+    // Debounce retries to avoid hammering
+    if (!state.active._retryScheduled) {
+      state.active._retryScheduled = true;
+      setTimeout(() => {
+        state.active._retryScheduled = false;
+        if (state.active.id) {
+          loadMessages({ older: false }).catch(() => {});
+        }
+      }, 2000);
+    }
+  }
   return { row, ...decoded };
 }
 
@@ -930,6 +943,9 @@ export async function ensureConversationSession(conversation) {
       emit();
     }
   } else {
+    // Proactively fetch peer's keys so we're ready when their handshake arrives.
+    // This reduces the race window on cold starts.
+    api.keys(conversation.id).catch(() => {});
     try { await api.repair(conversation.id); } catch { /* rate-limited is fine */ }
     diag.event('session_repair_requested', { conversationId: conversation.id });
   }
@@ -957,6 +973,10 @@ export async function requestSecureSession() {
 async function sendHiddenSession(conversationId, peerId) {
   const info = engine.sessionInfo(conversationId);
   if (info.exists && !info.pending) return info;
+  // Ensure our keys are published BEFORE sending the handshake message.
+  // This prevents the recipient from getting 'keys_unavailable' when they
+  // try to adopt the handshake (critical on cold-start platforms like Render).
+  await engine.publishKeys();
   const session = await engine.ensureSession(conversationId, peerId);
   if (session?.needsPeer) return { exists: false };
   if (info.exists && !info.pending) return engine.sessionInfo(conversationId);
@@ -1631,205 +1651,86 @@ export async function togglePush(enabled) {
   }
 }
 
-export function pushStatus() {
-  return pushSupportStatus();
-}
-
-export async function refreshStorageEstimate() {
+export async function installPwa() {
+  if (!state.canInstall) return;
   try {
-    state.storage = await dbEstimate();
-    emit();
-  } catch { /* optional */ }
+    const promptEvent = state._deferredPrompt;
+    if (promptEvent) {
+      await promptEvent.prompt();
+      const { outcome } = await promptEvent.userChoice;
+      if (outcome === 'accepted') {
+        state.canInstall = false;
+        state._deferredPrompt = null;
+        emit();
+      }
+    }
+  } catch { /* ignore */ }
 }
-
-export async function clearDecryptedCache() {
-  if (!vault) return;
-  await vault.clearMessageCache();
-  await vault.clearMediaCache();
-  await vault.clearOutbox();
-  if (engine.keystore) {
-    engine.keystore.seen = {};
-    await engine.persist();
-  }
-  state.previews = {};
-  toast('Decrypted copies removed from this device.', { tone: 'ok' });
-  if (state.active.id) await loadMessages({ older: false });
-  await refreshStorageEstimate();
-}
-
-export async function removeDeviceKeys() {
-  if (!vault) return;
-  await vault.destroyLocal();
-  engine.detach();
-  vault = null;
-  await signOut();
-  toast('Keys removed from this device. Restore with your recovery key to return.', {
-    tone: 'warn',
-    timeout: 9000
-  });
-}
-
-/* -------------------------------------------------------------------------- */
-/* Install prompt + online/offline                                            */
-/* -------------------------------------------------------------------------- */
-
-let deferredPrompt = null;
 
 function installGlobalListeners() {
-  if (installGlobalListeners.done) return;
-  installGlobalListeners.done = true;
-
   window.addEventListener('online', () => {
     state.offline = false;
-    emit();
-    startRealtime();
-    if (state.vault.unlocked && state.active.id) {
-      engine.clearRetryableFailures(state.active.id);
-      void loadMessages({ older: false });
+    if (state.vault.unlocked) {
+      void startRealtime();
+      void startPresence();
+      void publishKeysSoon(0);
+      void resumeOutbox();
     }
-    void refreshAll().catch(() => {});
-    void resumeOutbox().catch(() => {});
+    emit();
   });
   window.addEventListener('offline', () => {
     state.offline = true;
     emit();
   });
-  window.addEventListener('duet:auth-expired', handleAuthExpired);
-
-  for (const eventName of ['pointerdown', 'keydown', 'touchstart', 'wheel']) {
-    window.addEventListener(eventName, noteActivity, { passive: true });
-  }
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') {
-      hiddenAt = Date.now();
-      void beatPresence(true);
-      if (vault && !vault.locked) void vault.persist().catch(() => {});
-    } else {
+  window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
       noteActivity();
-      if (hiddenAt && state.settings.autoLockMinutes > 0 &&
-          Date.now() - hiddenAt > state.settings.autoLockMinutes * 60_000) {
-        void lockVault('background');
-      }
-      hiddenAt = 0;
-      void beatPresence(true);
-      if (state.active.id) {
-        engine.clearRetryableFailures(state.active.id);
-        void loadMessages({ older: false });
+      if (state.vault.unlocked) {
+        void beatPresence(true);
         void markConversationRead();
+        void resumeOutbox();
       }
-      void refreshAll().catch(() => {});
+    } else {
+      hiddenAt = Date.now();
     }
   });
-
-  window.addEventListener('pagehide', () => {
-    if (vault && !vault.locked) void vault.persist().catch(() => {});
-    if (state.auth.user) {
-      try {
-        fetch('/api/auth/presence', {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ visible: state.settings.presenceVisible, online: false }),
-          keepalive: true
-        });
-      } catch { /* ignore */ }
-    }
-  });
-
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault();
-    deferredPrompt = event;
+    state._deferredPrompt = event;
     state.canInstall = true;
     emit();
   });
   window.addEventListener('appinstalled', () => {
-    deferredPrompt = null;
     state.canInstall = false;
+    state._deferredPrompt = null;
     emit();
-    toast('Duet installed.', { tone: 'ok' });
   });
-
-  const media = window.matchMedia?.('(prefers-color-scheme: dark)');
-  media?.addEventListener?.('change', () => {
-    if (state.settings.theme === 'system') applyTheme();
-  });
-
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
-      if (state.mediaViewer) closeMediaViewer();
-      else if (state.sheets.name) closeSheet();
-    }
-  });
+  window.addEventListener('duet:auth-expired', handleAuthExpired);
 }
 
-export async function promptInstall() {
-  if (!deferredPrompt) {
-    toast('Use your browser menu and choose "Add to Home Screen".');
-    return false;
-  }
-  deferredPrompt.prompt();
-  const choice = await deferredPrompt.userChoice;
-  deferredPrompt = null;
-  state.canInstall = false;
-  emit();
-  return choice?.outcome === 'accepted';
-}
-
-/* -------------------------------------------------------------------------- */
-/* Key backup retry                                                           */
-/* -------------------------------------------------------------------------- */
-
-export function publishKeysSoon(delay = 1500) {
-  clearTimeout(keyRetryTimer);
+async function publishKeysSoon(delayMs) {
+  if (!engine.ready) return;
+  if (keyRetryTimer) clearTimeout(keyRetryTimer);
   keyRetryTimer = setTimeout(async () => {
-    if (!engine.ready) return;
     try {
       await engine.publishKeys();
-      state.vault.keyError = null;
-      emit();
     } catch (error) {
-      state.vault.keyError = errorMessage(error);
-      emit();
-      keyRetryTimer = setTimeout(() => publishKeysSoon(0), 30_000);
+      if (error.code === 'locked') return; // vault locked meanwhile
+      // Retry with backoff on transient failures
+      if (['offline', 'timeout', 'store_unreachable'].includes(error.code)) {
+        publishKeysSoon(Math.min(delayMs + 5000, 60000));
+      }
     }
-  }, delay);
+  }, delayMs);
 }
 
-export async function publishKeysNow() {
-  if (!engine.ready) return;
-  try {
-    const result = await engine.publishKeys();
-    state.vault.keyError = null;
+function refreshStorageEstimate() {
+  if (!navigator.storage?.estimate) return;
+  navigator.storage.estimate().then((estimate) => {
+    state.storage = {
+      usage: estimate.usage || 0,
+      quota: estimate.quota || 0
+    };
     emit();
-    toast(`Encryption keys published (${result?.pool ?? 0} one-time keys).`, { tone: 'ok' });
-  } catch (error) {
-    state.vault.keyError = errorMessage(error);
-    emit();
-    throw error;
-  }
+  }).catch(() => {});
 }
-
-/* -------------------------------------------------------------------------- */
-/* Diagnostics                                                                */
-/* -------------------------------------------------------------------------- */
-
-export function toggleDiagnostics(enabled) {
-  updateSettings({ diagnostics: Boolean(enabled) });
-  diag.configure({ enabled: Boolean(enabled), build: state.build });
-  if (enabled) {
-    toast('Anonymous diagnostics on. IDs and counts only — never message content.', { timeout: 7000 });
-    diag.event('vault_unlocked', { reason: 'diagnostics_enabled' });
-  } else {
-    toast('Anonymous diagnostics off.');
-  }
-}
-
-export function exportDiagnostics() {
-  const events = diag.snapshot();
-  const lines = events.map((entry) =>
-    `${entry.at} ${entry.event} ${JSON.stringify(entry.fields)}`);
-  return `Duet diagnostics\nbuild: ${state.build}\ncreated: ${new Date().toISOString()}\n\n${lines.join('\n')}\n`;
-}
-
-export { errorMessage };
