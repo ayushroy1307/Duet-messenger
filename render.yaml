@@ -1,0 +1,32 @@
+# Render Blueprint: New → Blueprint → pick this repo. Secrets marked sync:false are asked for in the dashboard.
+services:
+  - type: web
+    name: duet
+    runtime: node
+    plan: starter            # use a paid plan: the free plan sleeps, which drops realtime connections and delays push
+    region: singapore        # pick the region closest to your Supabase project
+    buildCommand: "echo no build step"
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    numInstances: 1          # IMPORTANT: realtime (SSE) and rate limits live in memory, so run exactly one instance
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: NODE_ENV
+        value: production
+      - key: COOKIE_SECURE
+        value: "1"
+      - key: PUBLIC_URL
+        sync: false          # e.g. https://duet.onrender.com (or your custom domain)
+      - key: SUPABASE_URL
+        sync: false          # https://<project-ref>.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false          # Dashboard → Project Settings → API → service_role (secret)
+      - key: SUPABASE_BUCKET
+        value: duet-media
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: AUTH_MODE
+        value: password      # phone number + password. No SMS provider needed. (Use "otp" only if you add Twilio.)
+      - key: SIGNUP_CODE
+        sync: false          # a passphrase you give only to the person you want to chat with; stops strangers registering

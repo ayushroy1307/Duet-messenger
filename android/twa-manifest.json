@@ -1,0 +1,16 @@
+{
+  "packageId": "app.duet.messenger",
+  "host": "YOUR-DOMAIN.example",
+  "name": "Duet",
+  "launcherName": "Duet",
+  "display": "standalone",
+  "themeColor": "#5B35D5",
+  "backgroundColor": "#F7F7FA",
+  "startUrl": "/",
+  "iconUrl": "https://YOUR-DOMAIN.example/icons/icon-512.png",
+  "maskableIconUrl": "https://YOUR-DOMAIN.example/icons/maskable-512.png",
+  "monochromeIconUrl": null,
+  "enableNotifications": true,
+  "orientation": "portrait",
+  "webManifestUrl": "https://YOUR-DOMAIN.example/manifest.webmanifest"
+}
