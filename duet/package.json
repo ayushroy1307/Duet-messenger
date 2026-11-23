@@ -1,0 +1,12 @@
+{
+  "name": "duet",
+  "version": "1.0.0",
+  "description": "Duet - a two-party, end-to-end encrypted messenger (zero-dependency build)",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.mjs"
+  }
+}
