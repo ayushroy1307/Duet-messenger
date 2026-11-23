@@ -36,6 +36,7 @@ begin
   loop
     execute format('alter table public.%I enable row level security', t);
     execute format('revoke all on public.%I from anon, authenticated', t);
+    execute format('grant select, insert, update, delete on public.%I to service_role', t);
     execute format('drop trigger if exists %I on public.%I', t || '_touch', t);
     execute format('create trigger %I before update on public.%I for each row execute function duet_touch()', t || '_touch', t);
   end loop;
