@@ -1,5 +1,7 @@
-"""Generates public/img/chat-bg.jpg: an original stitched-embroidery scene (tree, heart patch, grass, flowers).
-Re-run with:  python3 tools/make_wallpaper.py   (needs Pillow + numpy). Replace the JPEG with any picture you like."""
+"""Generates the earlier stitched-embroidery scene (tree, heart patch, grass, flowers).
+The app now ships the 4K doodle wallpaper from tools/wall/wall.svg; run this only if you want
+the old look:  python3 tools/make_wallpaper.py public/img/chat-bg-embroidery.jpg
+(needs Pillow + numpy)."""
 import math, random, sys
 import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
@@ -125,5 +127,5 @@ grain = np.random.normal(0, 4.5, (H, W, 1))
 vig = 1 - 0.30 * (((xx - W / 2) / (W / 2)) ** 2 + ((yy - H / 2) / (H / 2)) ** 2) / 2
 arr = np.clip((arr + weave + grain) * vig[:, :, None], 0, 255).astype('uint8')
 out = Image.fromarray(arr).filter(ImageFilter.GaussianBlur(0.8)).resize((W // S, H // S), Image.LANCZOS)
-out.save(sys.argv[1] if len(sys.argv) > 1 else 'public/img/chat-bg.jpg', quality=80, optimize=True, progressive=True)
+out.save(sys.argv[1] if len(sys.argv) > 1 else 'public/img/chat-bg-embroidery.jpg', quality=80, optimize=True, progressive=True)
 print('saved', out.size)
