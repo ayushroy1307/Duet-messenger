@@ -44,4 +44,14 @@ Tap the microphone in the composer (it swaps with Send while you type) to record
 Live voice *calls* are not included: they need WebRTC signalling over the encrypted channel plus a TURN server for mobile networks.
 
 ## Chat wallpaper
-`public/img/chat-bg.jpg` is an original embroidered-style scene produced by `tools/make_wallpaper.py` (needs Pillow + numpy). Replace the JPEG with any 900x1950 image to change it.
+`public/img/chat-bg.jpg` is a 4K (2160x3840) kawaii doodle scene, drawn as `tools/wall/wall.svg` and rendered to JPEG. `public/img/chat-bg-wide.jpg` (3840x2880) is the desktop cut, generated from the same artwork by `tools/wall/build.py`.
+
+To re-render after editing the SVG (needs Google Chrome and Python + Pillow):
+
+```sh
+tools/wall/render.sh
+```
+
+The script rebuilds the wide cut, screenshots both SVGs at full resolution, writes the JPEGs, and removes the intermediate PNGs. Set `CHROME=/path/to/chrome` if Chrome is not in the default macOS location.
+
+The picture is pinned on its own layer (`.pane-chat::before`), so only the message list scrolls. On phones it is fixed to `100lvh` so the iOS address bar and keyboard cannot shift it. `tools/make_wallpaper.py` still generates the earlier embroidered tree scene (by default to `public/img/chat-bg-embroidery.jpg`) if you want that instead.

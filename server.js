@@ -537,7 +537,8 @@ let _build = null;
 function buildTag() {
   if (_build) return _build;
   const h = crypto.createHash('sha256');
-  (function walk(dir) { for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) { const p = path.join(dir, e.name); if (e.isDirectory()) walk(p); else if (!/\.(png|ico|jpg|webp)$/.test(e.name)) h.update(e.name).update(fs.readFileSync(p)); } })(CFG.publicDir);
+  // Hash every public asset, images included: replacing the wallpaper alone must still roll the service-worker cache.
+  (function walk(dir) { for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) { const p = path.join(dir, e.name); if (e.isDirectory()) walk(p); else h.update(e.name).update(fs.readFileSync(p)); } })(CFG.publicDir);
   return (_build = h.digest('hex').slice(0, 10));
 }
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
