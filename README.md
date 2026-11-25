@@ -37,3 +37,11 @@ How storage works: the server keeps a working set in memory and writes changes t
 - The recovery code resets the PIN on this device. Message history is local-only (spec §10: no cloud export), so on a new device you start fresh and your contact re-pairs automatically.
 - Postgres tables are `id + jsonb` (messages also have real columns and indexes) behind a write-behind cache, not a normalised relational model. Dev uses a JSON file.
 - Not verified here: the Supabase and Twilio code was tested against local emulators only (no network access in this build environment). Also unverified: biometric (WebAuthn PRF) unlock, web push delivery, and the Android build.
+
+## Voice messages
+Tap the microphone in the composer (it swaps with Send while you type) to record up to 5 minutes. The audio is encrypted on your device like any photo or video (a fresh AES-256-GCM key travels inside the end-to-end encrypted message); the server and Supabase Storage only ever hold opaque bytes. The waveform and duration are inside the encrypted payload. The browser asks for microphone permission the first time. Recordings are WebM/Opus; very old iOS Safari versions cannot play WebM.
+
+Live voice *calls* are not included: they need WebRTC signalling over the encrypted channel plus a TURN server for mobile networks.
+
+## Chat wallpaper
+`public/img/chat-bg.jpg` is an original embroidered-style scene produced by `tools/make_wallpaper.py` (needs Pillow + numpy). Replace the JPEG with any 900x1950 image to change it.

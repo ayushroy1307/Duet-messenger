@@ -3,7 +3,7 @@ services:
   - type: web
     name: duet
     runtime: node
-    plan: starter            # use a paid plan: the free plan sleeps, which drops realtime connections and delays push
+    plan: free               # free instances sleep when idle (first load after a pause is slow, live updates pause). Upgrade in Render → Settings → Instance Type for always-on
     region: singapore        # pick the region closest to your Supabase project
     buildCommand: "echo no build step"
     startCommand: node server.js

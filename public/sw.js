@@ -4,8 +4,8 @@ const BUILD = '__BUILD__';
 const CACHE = 'duet-shell-' + BUILD;
 const SHELL = ['/', '/styles.css', '/manifest.webmanifest', '/favicon.ico',
   '/js/theme.js', '/js/build.js', '/js/app.js', '/js/main.js', '/js/state.js', '/js/ui.js', '/js/store.js', '/js/settings.js',
-  '/js/bio.js', '/js/media.js', '/js/countries.js', '/js/api.js', '/js/engine.js', '/js/crypto.js', '/js/vaultcore.js', '/js/util.js',
-  '/icons/icon-32.png', '/icons/icon-64.png', '/icons/icon-128.png', '/icons/icon-256.png', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png'];
+  '/js/bio.js', '/js/media.js', '/js/voice.js', '/img/chat-bg.jpg', '/js/countries.js', '/js/api.js', '/js/engine.js', '/js/crypto.js', '/js/vaultcore.js', '/js/util.js',
+  '/img/chat-bg.jpg', '/icons/icon-32.png', '/icons/icon-64.png', '/icons/icon-128.png', '/icons/icon-256.png', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => Promise.allSettled(SHELL.map((u) => c.add(new Request(u, { cache: 'reload' }))))).then(() => self.skipWaiting()));

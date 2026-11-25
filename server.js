@@ -89,8 +89,8 @@ function broadcastPresence(userId) {
 }
 
 // ------------------------------------------------------------ conversations
-const SECRET_TYPES = new Set(['text', 'image', 'video']);
-const MSG_TYPES = new Set(['text', 'image', 'video', 'edit', 'ctl']);
+const SECRET_TYPES = new Set(['text', 'image', 'video', 'audio']);
+const MSG_TYPES = new Set(['text', 'image', 'video', 'audio', 'edit', 'ctl']);
 function convFor(userId, convId) { const c = D.conversations.find((x) => x.id === convId); if (!c || !c.participants.includes(userId)) throw new HttpError(404, 'no-conversation', 'Conversation not found'); return c; }
 function convBetween(a, b) { return D.conversations.find((c) => c.participants.includes(a) && c.participants.includes(b)); }
 function getOrCreateConv(a, b) {
@@ -462,7 +462,7 @@ route('POST', '/api/messages/delete', { auth: true }, ({ user, body }) => {
 route('POST', '/api/media/upload', { auth: true, raw: true }, async ({ req, user }) => {
   rateLimit('media:' + user.id, 60, 3600e3);
   const c = convFor(user.id, req.headers['x-conversation']);
-  const kind = req.headers['x-kind'] === 'video' ? 'video' : 'image';
+  const kind = ['video', 'audio'].includes(req.headers['x-kind']) ? req.headers['x-kind'] : 'image';
   const len = Number(req.headers['content-length'] || 0);
   if (!len || len > MEDIA_MAX) throw new HttpError(413, 'too-large', 'Attachment too large (max 25 MB)');
   const chunks = []; let size = 0;
@@ -532,12 +532,12 @@ function handleSse(req, res, user) {
 }
 
 // ------------------------------------------------------------ static files
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.ico': 'image/x-icon', '.svg': 'image/svg+xml' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon', '.svg': 'image/svg+xml' };
 let _build = null;
 function buildTag() {
   if (_build) return _build;
   const h = crypto.createHash('sha256');
-  (function walk(dir) { for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) { const p = path.join(dir, e.name); if (e.isDirectory()) walk(p); else if (!/\.(png|ico)$/.test(e.name)) h.update(e.name).update(fs.readFileSync(p)); } })(CFG.publicDir);
+  (function walk(dir) { for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) { const p = path.join(dir, e.name); if (e.isDirectory()) walk(p); else if (!/\.(png|ico|jpg|webp)$/.test(e.name)) h.update(e.name).update(fs.readFileSync(p)); } })(CFG.publicDir);
   return (_build = h.digest('hex').slice(0, 10));
 }
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
@@ -548,8 +548,8 @@ function serveStatic(req, res, pathname) {
   if (!file.startsWith(CFG.publicDir + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404, { 'content-type': 'text/plain' }); return res.end('Not found'); }
   const ext = path.extname(file); let data = fs.readFileSync(file);
   if (/\.(html|js|webmanifest)$/.test(file) && (file.endsWith('index.html') || file.endsWith('sw.js') || file.endsWith('build.js'))) data = Buffer.from(data.toString().replaceAll('__BUILD__', buildTag()));
-  const long = /\.(png|ico)$/.test(ext);
-  res.writeHead(200, { 'content-type': MIME[ext] || 'application/octet-stream', 'cache-control': long ? 'public, max-age=86400' : 'no-cache', 'content-security-policy': CSP, 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'permissions-policy': 'camera=(), microphone=(), geolocation=()', 'x-frame-options': 'DENY', ...(file.endsWith('sw.js') ? { 'service-worker-allowed': '/' } : {}) });
+  const long = /\.(png|ico|jpg|webp)$/.test(ext);
+  res.writeHead(200, { 'content-type': MIME[ext] || 'application/octet-stream', 'cache-control': long ? 'public, max-age=86400' : 'no-cache', 'content-security-policy': CSP, 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'permissions-policy': 'camera=(), microphone=(self), geolocation=()', 'x-frame-options': 'DENY', ...(file.endsWith('sw.js') ? { 'service-worker-allowed': '/' } : {}) });
   res.end(data);
 }
 

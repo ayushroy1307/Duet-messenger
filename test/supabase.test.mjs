@@ -6,6 +6,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { createApi } from '../public/js/api.js';
 import { sleep } from '../public/js/util.js';
+import { authHeaders } from '../storage.js';
 
 const KEY = 'service-role-test-key';
 const tables = new Map(); const objects = new Map(); const buckets = new Set(); const log = [];
@@ -104,4 +105,9 @@ test('a wrong service key is rejected by the backend (server refuses to boot)', 
   const p = spawn(process.execPath, ['server.js'], { env: { ...process.env, PORT: String(PORT + 1), SUPABASE_URL: fakeUrl, SUPABASE_SERVICE_ROLE_KEY: 'wrong' }, stdio: ['ignore', 'pipe', 'pipe'] });
   const code = await new Promise((r) => p.once('exit', r));
   assert.notEqual(code, 0);
+});
+
+test('new-style sb_secret keys are sent in apikey only; legacy JWT keys in both', () => {
+  assert.deepEqual(authHeaders('sb_secret_abc'), { apikey: 'sb_secret_abc' });
+  assert.deepEqual(authHeaders('eyJhbGciOi.x.y'), { apikey: 'eyJhbGciOi.x.y', authorization: 'Bearer eyJhbGciOi.x.y' });
 });

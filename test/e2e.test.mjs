@@ -131,6 +131,16 @@ test('full flow: invite → conversation → E2EE messages, receipts, edit, dele
   await assert.rejects(stranger.api.downloadMedia(mrow.mediaId), (e) => e.status === 404 || e.status === 403);
   await assert.rejects(stranger.api.fetchMessages(convId, {}), (e) => e.status === 404, 'non-participants see nothing');
 
+  // voice message: opaque audio blob, waveform + duration inside the encrypted payload
+  await init.conv.sendMedia({ kind: 'audio', bytes: enc.encode('OPUSBYTES-SECRET'), mime: 'audio/webm', name: 'voice', duration: 7, wave: [10, 50, 90, 30] });
+  await init.conv.flush(); await resp.conv.catchUp();
+  const arow = (await respU.api.fetchMessages(convId, {})).messages.find((m) => m.type === 'audio');
+  assert.ok(arow, 'audio row stored with type audio');
+  assert.ok(!dec.decode(await respU.api.downloadMedia(arow.mediaId)).includes('OPUSBYTES'));
+  const ao = await resp.conv.decodeRow(arow);
+  assert.equal(ao.payload.t, 'audio'); assert.equal(ao.payload.duration, 7); assert.deepEqual(ao.payload.wave, [10, 50, 90, 30]);
+  assert.equal(dec.decode(await resp.conv.openMedia(ao.payload)), 'OPUSBYTES-SECRET');
+
   // edit + delete are server-side state
   const e1 = await init.conv.send({ t: 'text', body: 'typo' }); await init.conv.flush();
   await init.conv.send({ t: 'edit', ref: e1.clientId, body: 'fixed' }, { type: 'edit', editsClientId: e1.clientId }); await init.conv.flush();

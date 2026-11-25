@@ -1,11 +1,12 @@
 // The unlocked app: chat list, chat view, sheets (settings / invite / start chat), realtime.
 import { S, api, actions, refreshSettings } from './state.js';
-import { h, ic, btn, field, clear, avatar, toast, openSheet, confirmSheet, showViewer, fmtClock, fmtDay, dayKey, fmtList, fmtLastSeen } from './ui.js';
+import { h, btn, svg, iconBtn, field, clear, avatar, toast, openSheet, confirmSheet, showViewer, fmtClock, fmtDay, dayKey, fmtList, fmtLastSeen } from './ui.js';
 import { COUNTRIES, flag, defaultCountry, toE164 } from './countries.js';
 import { setSetting, getSettings, AUTOLOCK_OPTIONS } from './settings.js';
 import { prepareImage, prepareVideo } from './media.js';
 import { bioAvailable } from './bio.js';
 import { BUILD } from './build.js';
+import { Recorder, voiceSupported, fmtDur } from './voice.js';
 
 let el = null;           // #app
 let listEl = null, chatEl = null;
@@ -23,14 +24,14 @@ export function renderMain(container) {
   el = container;
   const shell = h('div', { class: 'shell' + (C ? ' has-chat' : '') });
   listEl = h('section', { class: 'pane-list', 'aria-label': 'Conversations' });
-  chatEl = h('section', { class: 'pane-chat', 'aria-label': 'Conversation' }, h('div', { class: 'pane-empty' }, ic('xl'), h('p', {}, 'Select a conversation')));
+  chatEl = h('section', { class: 'pane-chat', 'aria-label': 'Conversation' }, h('div', { class: 'pane-empty' }, h('p', {}, 'Select a conversation')));
   shell.append(listEl, chatEl);
   el.append(shell);
   renderList();
   if (C) { const keep = C.conv; C = null; openChat(keep.id); }
 }
 export function startMain() { connectSse(); refreshAll(); }
-export function stopMain() { if (es) { es.close(); es = null; } S.sseUp = false; C = null; }
+export function stopMain() { if (es) { es.close(); es = null; } S.sseUp = false; cancelRec(); stopPlayer(); clearVoiceCache(); C = null; }
 
 async function refreshAll() {
   try {
@@ -95,7 +96,7 @@ async function onIncoming(row) {
   else api.postReceipt(c.id, row.id, 'delivered').catch(() => {});
   await refreshList();
   if (document.hidden && S.settings.notifications && 'Notification' in window && Notification.permission === 'granted' && row.type !== 'ctl' && row.type !== 'edit') {
-    const o = await ce._loadOutcome(row.id); const body = S.settings.hidePreviews || o?.state !== 'ok' ? 'New message' : o.payload.t === 'text' ? o.payload.body.slice(0, 80) : o.payload.t === 'image' ? 'Photo' : 'Video';
+    const o = await ce._loadOutcome(row.id); const body = S.settings.hidePreviews || o?.state !== 'ok' ? 'New message' : o.payload.t === 'text' ? o.payload.body.slice(0, 80) : o.payload.t === 'image' ? 'Photo' : o.payload.t === 'audio' ? 'Voice message' : 'Video';
     try { new Notification(c.peer.displayName, { body, icon: '/icons/icon-192.png', tag: c.id }); } catch { /* not allowed here */ }
   }
 }
@@ -113,24 +114,23 @@ async function previewFor(c) {
   const o = await S.engine.conv(c.id, c.peer.id)._loadOutcome(lm.id);
   if (!o || o.state !== 'ok') return o ? 'Message not readable' : 'Encrypted message';
   const mine = lm.senderId === S.user.id ? 'You: ' : '';
-  return mine + (o.payload.t === 'text' ? o.payload.body : o.payload.t === 'image' ? 'Photo' : 'Video');
+  return mine + (o.payload.t === 'text' ? o.payload.body : o.payload.t === 'image' ? 'Photo' : o.payload.t === 'audio' ? 'Voice message' : 'Video');
 }
 
 async function renderList() {
   if (!listEl) return;
-  const top = h('div', { class: 'topbar' }, h('div', { class: 'brand-mini' }, ic('lg'), h('h1', {}, 'Duet')),
-    btn('Lock', { small: true, kind: 'quiet', onClick: () => actions.lock('manual'), title: 'Lock Duet now' }),
-    btn('Settings', { small: true, kind: 'quiet', onClick: openSettings }));
+  const top = h('div', { class: 'topbar' }, h('h1', { class: 'title' }, 'Duet'), h('span', { class: 'spacer' }),
+    iconBtn('lock', 'Lock', () => actions.lock('manual')), iconBtn('sliders', 'Settings', openSettings));
   const list = h('div', { class: 'list' });
   const b = banner();
   const inc = S.connections.incoming || [];
-  const parts = [top, b ? h('div', { class: 'banner' }, ic('xs'), h('span', {}, b)) : null,
+  const parts = [top, b ? h('div', { class: 'banner' }, h('span', {}, b)) : null,
     h('div', { class: 'actions' }, btn('Invite someone', { kind: 'primary', small: true, onClick: openInvite }), btn('Start with a number', { small: true, onClick: openStartChat })),
     ...inc.map((r) => h('div', { class: 'reqs' }, avatar({ displayName: r.name, avatar: r.avatar }, 'sm'), h('div', { class: 'grow' }, h('b', {}, r.name || r.maskedPhone), ' wants to chat'),
       btn('Accept', { small: true, kind: 'primary', onClick: async () => { try { const x = await api.respondConnection(r.id, true); await refreshAll(); openChat(x.conversation.id); } catch (e) { toast(e.message); } } }),
       btn('Decline', { small: true, kind: 'quiet', onClick: async () => { await api.respondConnection(r.id, false).catch(() => {}); S.connections = await api.connections().catch(() => S.connections); renderList(); } }))),
     list];
-  if (!S.convs.length) list.append(h('div', { class: 'empty' }, ic('hero'), h('h2', {}, 'Your private line'), h('p', { class: 'muted' }, 'Duet is for exactly two people. Share an invite link, or start with their phone number.'), (S.connections.outgoing || []).length ? h('p', { class: 'small muted' }, `Waiting for ${(S.connections.outgoing || []).length} request(s) to be accepted.`) : null));
+  if (!S.convs.length) list.append(h('div', { class: 'empty' }, h('h2', {}, 'Your private line'), h('p', { class: 'muted' }, 'Duet is for exactly two people. Share an invite link, or start with their phone number.'), (S.connections.outgoing || []).length ? h('p', { class: 'small muted' }, `Waiting for ${(S.connections.outgoing || []).length} request(s) to be accepted.`) : null));
   const previews = await Promise.all(S.convs.map(previewFor));
   S.convs.forEach((c, i) => {
     list.append(h('button', { class: 'conv', 'aria-current': C?.conv.id === c.id ? 'true' : null, on: { click: () => openChat(c.id) } },
@@ -156,6 +156,7 @@ function statusNotice(ce, peer) {
 export async function openChat(convId) {
   const conv = S.convs.find((c) => c.id === convId); if (!conv) return;
   const ce = S.engine.conv(conv.id, conv.peer.id);
+  cancelRec(); stopPlayer(); clearVoiceCache();
   C = { conv, ce, rows: new Map(), dec: new Map(), cursor: null, lastRead: null, emojiOpen: false, ctx: null, loading: false };
   document.querySelector('.shell')?.classList.add('has-chat');
   buildChatPane(); renderList();
@@ -167,49 +168,121 @@ export async function openChat(convId) {
 function buildChatPane() {
   const msgs = h('div', { class: 'msgs', role: 'log', 'aria-label': 'Messages' });
   const head = h('div', { class: 'chat-head' });
-  const sec = h('div', {});
-  const ctx = h('div', {});
-  const emoji = h('div', {});
-  const ta = h('textarea', { rows: 1, placeholder: 'Message', 'aria-label': 'Message', maxLength: 4000, enterKeyHint: 'send' });
+  const sec = h('div', {}); const ctx = h('div', {}); const emoji = h('div', {});
+  const ta = h('textarea', { rows: 1, placeholder: 'Message…', 'aria-label': 'Message', maxLength: 4000, enterKeyHint: 'send' });
   const file = h('input', { type: 'file', accept: 'image/*,video/*', class: 'sr', tabIndex: -1, on: { change: () => attach(file) } });
-  const sendB = h('button', { class: 'tool send', type: 'button', 'aria-label': 'Send', on: { click: sendText } }, ic('md'), h('span', {}, 'Send'));
-  const attachB = h('button', { class: 'tool', type: 'button', 'aria-label': 'Attach photo or video', on: { click: () => file.click() } }, ic('md'), h('span', {}, 'Media'));
-  const emojiB = h('button', { class: 'tool', type: 'button', 'aria-label': 'Emoji', on: { click: () => { C.emojiOpen = !C.emojiOpen; renderEmoji(); } } }, ic('md'), h('span', {}, 'Emoji'));
+  const sendB = h('button', { class: 'send-btn', type: 'button', 'aria-label': 'Send', title: 'Send', hidden: true, on: { click: sendText } }, svg('send', 19));
+  const micB = h('button', { class: 'pill-btn', type: 'button', 'aria-label': 'Record voice message', title: 'Record voice message', hidden: !voiceSupported(), on: { click: startRec } }, svg('mic', 22));
+  const attachB = h('button', { class: 'cam-btn', type: 'button', 'aria-label': 'Attach photo or video', title: 'Photo or video', on: { click: () => file.click() } }, svg('camera', 22));
+  const emojiB = h('button', { class: 'pill-btn', type: 'button', 'aria-label': 'Emoji', title: 'Emoji', on: { click: () => { C.emojiOpen = !C.emojiOpen; renderEmoji(); } } }, svg('smile', 22));
   ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && matchMedia('(hover: hover)').matches) { e.preventDefault(); sendText(); } });
-  ta.addEventListener('input', () => { ta.style.height = 'auto'; ta.style.height = Math.min(140, ta.scrollHeight) + 'px'; });
-  const composer = h('div', { class: 'composer' }, ctx, emoji, h('div', { class: 'composer-row' }, emojiB, attachB, ta, sendB), file);
-  Object.assign(C, { msgsEl: msgs, headEl: head, secEl: sec, ctxEl: ctx, emojiEl: emoji, ta, sendB, attachB, emojiB });
+  const sync = () => { ta.style.height = 'auto'; ta.style.height = Math.min(140, ta.scrollHeight) + 'px'; const has = !!ta.value.trim(); sendB.hidden = !has; micB.hidden = has || !voiceSupported(); };
+  ta.addEventListener('input', sync);
+  const normalRow = h('div', { class: 'composer-row' }, attachB, h('div', { class: 'pill' }, ta, emojiB, micB, sendB));
+  const recTime = h('span', { class: 'rec-time', role: 'timer', 'aria-label': 'Recording time' }, '0:00'); const recLevels = h('div', { class: 'rec-levels', 'aria-hidden': 'true' });
+  const recRow = h('div', { class: 'composer-row rec-row', hidden: true },
+    iconBtn('trash', 'Cancel recording', () => finishRec(false)), h('div', { class: 'rec-pill', role: 'status' }, h('span', { class: 'rec-dot' }), recTime, recLevels),
+    h('button', { class: 'send-btn', type: 'button', 'aria-label': 'Send voice message', title: 'Send voice message', on: { click: () => finishRec(true) } }, svg('send', 20)));
+  const composer = h('div', { class: 'composer' }, ctx, emoji, normalRow, recRow, file);
+  Object.assign(C, { msgsEl: msgs, headEl: head, secEl: sec, ctxEl: ctx, emojiEl: emoji, ta, sendB, micB, attachB, emojiB, syncSend: sync, normalRow, recRow, recTime, recLevels });
   clear(chatEl).append(head, sec, msgs, composer);
   renderHead(); renderBanner(); renderComposerState();
   msgs.addEventListener('scroll', () => { C.atBottom = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 80; }, { passive: true });
   C.atBottom = true;
 }
 
+// ---- voice messages: record, encrypt like any attachment, send
+async function startRec() {
+  if (!C || C.rec) return; if (!C.ce.ready) return toast('Secure session is not ready yet');
+  const mine = C;
+  const rec = new Recorder({
+    onTick: (ms, lv) => {
+      if (C !== mine || !mine.rec) return;
+      mine.recTime.textContent = fmtDur(ms / 1000);
+      mine.recLevels.append(h('i', { style: { height: Math.max(10, Math.round(lv * 100)) + '%' } }));
+      while (mine.recLevels.childElementCount > 40) mine.recLevels.firstChild.remove();
+    },
+    onLimit: () => { toast('5 minute limit reached'); finishRec(true); },
+  });
+  try { await rec.start(); } catch (e) {
+    return toast(e.name === 'NotAllowedError' || e.name === 'SecurityError' ? 'Microphone access is blocked. Allow it in your browser’s site settings.' : e.name === 'NotFoundError' ? 'No microphone was found.' : 'Could not start recording.');
+  }
+  if (C !== mine) { rec.cancel(); return; }
+  mine.rec = rec; mine.recTime.textContent = '0:00'; clear(mine.recLevels); mine.normalRow.hidden = true; mine.recRow.hidden = false;
+}
+async function finishRec(send) {
+  const mine = C; const rec = mine?.rec; if (!rec) return;
+  mine.rec = null; mine.recRow.hidden = true; mine.normalRow.hidden = false;
+  if (!send) return void rec.cancel();
+  try {
+    const r = await rec.stop();
+    if (r.duration < 0.6) return toast('That voice message was too short.');
+    await mine.ce.sendMedia({ kind: 'audio', bytes: r.bytes, mime: r.mime, name: 'voice-message', duration: r.duration, wave: r.wave });
+    mine.atBottom = true; mine.ce.flush();
+  } catch (e) { toast(e.code === 'not-ready' ? 'Secure session is not ready yet' : 'Could not send the voice message.'); }
+}
+function cancelRec() { if (C?.rec) { C.rec.cancel(); C.rec = null; } }
+
+// ---- voice playback: one at a time; the bubble UI is repainted from this state after every re-render
+const player = { id: null, audio: null, loading: false, urls: new Map(), token: 0 };
+function stopPlayer() { player.token++; if (player.audio) { player.audio.pause(); player.audio = null; } player.id = null; player.loading = false; updateVoiceUi(); }
+function clearVoiceCache() { for (const u of player.urls.values()) URL.revokeObjectURL(u); player.urls.clear(); }
+async function togglePlay(p) {
+  if (player.id === p.mediaId && player.audio) { if (player.audio.paused) player.audio.play().catch(() => {}); else player.audio.pause(); return; }
+  stopPlayer(); const token = player.token; player.id = p.mediaId; player.loading = true; updateVoiceUi();
+  try {
+    let url = player.urls.get(p.mediaId);
+    if (!url) { const bytes = await C.ce.openMedia(p); url = URL.createObjectURL(new Blob([bytes], { type: p.mime || 'audio/webm' })); player.urls.set(p.mediaId, url); }
+    if (token !== player.token) return;
+    const a = new Audio(url); player.audio = a; player.loading = false;
+    for (const ev of ['play', 'pause', 'timeupdate', 'ended']) a.addEventListener(ev, () => { if (player.audio !== a) return; if (ev === 'ended') { player.audio = null; player.id = null; } updateVoiceUi(a); });
+    await a.play();
+  } catch { if (token === player.token) { stopPlayer(); toast('This voice message could not be played.'); } }
+}
+function updateVoiceUi() {
+  for (const el of document.querySelectorAll('.voice')) {
+    const mine = el.dataset.mid === player.id; const a = mine ? player.audio : null;
+    const total = Number(el.dataset.dur) || 0; const dur = a && isFinite(a.duration) && a.duration > 0 ? a.duration : total;
+    const prog = a && dur ? Math.min(1, a.currentTime / dur) : 0;
+    el.classList.toggle('playing', !!a && !a.paused); el.classList.toggle('loading', mine && player.loading);
+    const bars = el.querySelectorAll('.vbars i'); const upto = Math.round(prog * bars.length);
+    bars.forEach((b, i) => b.classList.toggle('on', i < upto));
+    el.querySelector('.vdur').textContent = fmtDur(a && !a.paused ? a.currentTime : total);
+    el.querySelector('.vplay').setAttribute('aria-label', a && !a.paused ? 'Pause voice message' : 'Play voice message');
+  }
+}
+function audioNode(p) {
+  const wave = p.wave && p.wave.length ? p.wave : Array.from({ length: 40 }, (_, i) => 25 + ((i * 37) % 55));
+  return h('div', { class: 'voice', dataset: { mid: p.mediaId, dur: p.duration || 0 } },
+    h('button', { type: 'button', class: 'vplay', 'aria-label': 'Play voice message', on: { click: (e) => { e.stopPropagation(); togglePlay(p); } } }, h('span', { class: 'pl' }, svg('play', 18)), h('span', { class: 'pa' }, svg('pause', 18))),
+    h('div', { class: 'vbars', 'aria-hidden': 'true' }, wave.map((v) => h('i', { style: { height: Math.max(12, Math.min(100, v)) + '%' } }))),
+    h('span', { class: 'vdur' }, fmtDur(p.duration || 0)));
+}
+
 function renderHead() {
   if (!C) return; const p = C.conv.peer;
-  const sub = p.online === null ? '' : p.online ? 'online' : fmtLastSeen(p.lastSeen);
-  const back = btn('Back', { kind: 'quiet', small: true, onClick: closeChat, title: 'Back to chats' }); back.classList.add('back-btn');
-  clear(C.headEl).append(back,
-    avatar(p, 'sm', p.online), h('div', { class: 'who' }, h('div', { class: 'nm' }, p.displayName), h('div', { class: 'small muted' }, sub)),
-    btn('Security', { kind: 'quiet', small: true, onClick: openSecurity }));
+  const sub = p.online === null ? '' : p.online ? 'Active now' : fmtLastSeen(p.lastSeen);
+  clear(C.headEl).append(iconBtn('back', 'Back', closeChat, 'back-btn'),
+    avatar(p, 'sm', p.online), h('div', { class: 'who' }, h('div', { class: 'nm' }, p.displayName), h('div', { class: 'sub' }, sub)),
+    iconBtn('shield', 'Security', openSecurity));
 }
-function closeChat() { C = null; document.querySelector('.shell')?.classList.remove('has-chat'); clear(chatEl).append(h('div', { class: 'pane-empty' }, ic('xl'), h('p', {}, 'Select a conversation'))); renderList(); }
+function closeChat() { cancelRec(); stopPlayer(); clearVoiceCache(); C = null; document.querySelector('.shell')?.classList.remove('has-chat'); clear(chatEl).append(h('div', { class: 'pane-empty' }, h('p', {}, 'Select a conversation'))); renderList(); }
 
 function renderBanner() {
   if (!C) return; const ce = C.ce; const n = statusNotice(ce, C.conv.peer.displayName);
   const bits = [];
-  if (n) bits.push(h('div', { class: 'secbar' }, ic('sm'), h('div', { class: 'grow' }, h('div', {}, n[0]), n[1] ? h('div', { class: 'small muted' }, n[1]) : null), ce.status === 'error' ? btn('Re-pair', { small: true, onClick: () => ce.repair() }) : null));
-  if (ce.meta.identityChanged) bits.push(h('div', { class: 'secbar' }, ic('sm'), h('div', { class: 'grow' }, `${C.conv.peer.displayName}'s security code changed (new phone or reinstall). Compare it in person if this was unexpected.`), btn('Dismiss', { small: true, kind: 'quiet', onClick: () => { ce.meta.identityChanged = false; ce.persist.mark(); renderBanner(); } })));
+  if (n) bits.push(h('div', { class: 'secbar' }, h('div', { class: 'grow' }, h('div', {}, n[0]), n[1] ? h('div', { class: 'small muted' }, n[1]) : null), ce.status === 'error' ? btn('Re-pair', { small: true, onClick: () => ce.repair() }) : null));
+  if (ce.meta.identityChanged) bits.push(h('div', { class: 'secbar' }, h('div', { class: 'grow' }, `${C.conv.peer.displayName}'s security code changed (new phone or reinstall). Compare it in person if this was unexpected.`), btn('Dismiss', { small: true, kind: 'quiet', onClick: () => { ce.meta.identityChanged = false; ce.persist.mark(); renderBanner(); } })));
   clear(C.secEl).append(...bits);
 }
 function renderComposerState() {
   if (!C) return; const can = C.ce.ready;
-  C.ta.disabled = !can; C.sendB.disabled = !can; C.attachB.disabled = !can;
-  C.ta.placeholder = can ? 'Message' : 'Waiting for a secure session…';
+  C.ta.disabled = !can; C.sendB.disabled = !can; C.attachB.disabled = !can; C.emojiB.disabled = !can; C.micB.disabled = !can; C.micB.disabled = !can;
+  C.ta.placeholder = can ? 'Message…' : 'Waiting for a secure session…';
 }
 function renderEmoji() {
   clear(C.emojiEl); if (!C.emojiOpen) return;
-  C.emojiEl.append(h('div', { class: 'emoji-grid', role: 'group', 'aria-label': 'Emoji' }, EMOJI.map((e) => h('button', { type: 'button', 'aria-label': e, on: { click: () => { const t = C.ta; const s = t.selectionStart ?? t.value.length; t.setRangeText(e, s, t.selectionEnd ?? s, 'end'); t.focus(); } } }, e))));
+  C.emojiEl.append(h('div', { class: 'emoji-grid', role: 'group', 'aria-label': 'Emoji' }, EMOJI.map((e) => h('button', { type: 'button', 'aria-label': e, on: { click: () => { const t = C.ta; const s = t.selectionStart ?? t.value.length; t.setRangeText(e, s, t.selectionEnd ?? s, 'end'); t.focus(); C.syncSend(); } } }, e))));
 }
 
 async function decodeInto(row) { C.dec.set(row.id, await C.ce.decodeRow(row)); }
@@ -254,36 +327,52 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && C)
 function statusIcon(row, pending) {
   const k = pending ? 'sending' : row.readAt ? 'read' : row.deliveredAt ? 'delivered' : 'sent';
   const label = { sending: 'Sending', sent: 'Sent', delivered: 'Delivered', read: 'Read' }[k];
-  return h('img', { class: `ic ds ds-${k}`, src: '/icons/icon-32.png', alt: label, title: label });
+  return h('span', { class: `ds ds-${k}`, role: 'img', 'aria-label': label, title: label }, svg(k === 'sent' || k === 'sending' ? 'check' : 'check2', 14));
 }
-function snippet(p) { return !p ? '' : p.t === 'text' ? p.body.slice(0, 90) : p.t === 'image' ? 'Photo' : 'Video'; }
+function snippet(p) { return !p ? '' : p.t === 'text' ? p.body.slice(0, 90) : p.t === 'image' ? 'Photo' : p.t === 'audio' ? 'Voice message' : 'Video'; }
+const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}[\u{FE0F}\u{200D}\u{1F3FB}-\u{1F3FF}]*\s*){1,5}$/u;
+const GROUP_MS = 5 * 60e3, SEP_MS = 30 * 60e3;
 
 function renderMsgs(stick) {
   if (!C) return; const mine = C; const wasBottom = mine.atBottom;
   const rows = [...mine.rows.values()].sort((a, b) => ts(a) - ts(b) || (a.id < b.id ? -1 : 1));
-  const edits = new Map(); const byClient = new Map();
-  for (const r of rows) { byClient.set(r.clientId, r); const o = mine.dec.get(r.id); if (r.type === 'edit' && o?.state === 'ok' && !r.deletedAt) edits.set(r.senderId + ':' + o.payload.ref, o.payload.body); }
-  const nodes = []; let lastDay = null;
-  if (mine.cursor) nodes.push(h('button', { class: 'btn btn-sm more', on: { click: loadOlder } }, 'Load earlier messages'));
-  const seen = new Set(rows.map((r) => r.clientId));
-  const pending = mine.pending || [];
-  const place = (r, o, isPending) => {
-    const when = r.createdAt; if (dayKey(when) !== lastDay) { lastDay = dayKey(when); nodes.push(h('div', { class: 'day' }, fmtDay(when))); }
-    const own = r.senderId === S.user.id;
-    if (r.deletedAt) return nodes.push(h('div', { class: 'muted-row' }, own ? 'You deleted this message' : 'This message was deleted'));
-    if (!o) return nodes.push(h('div', { class: 'muted-row' }, 'Opening…'));
-    if (o.state === 'pending') return nodes.push(h('div', { class: 'muted-row' }, 'Waiting for the secure session to start…'));
-    if (o.state === 'dead') return nodes.push(h('div', { class: 'muted-row' }, 'No longer readable. ', REASONS[o.reason] || ''));
-    if (o.state === 'failed') return nodes.push(h('div', { class: 'muted-row' }, "This message couldn't be decrypted. ", REASONS[o.reason] || ''));
+  const edits = new Map();
+  for (const r of rows) { const o = mine.dec.get(r.id); if (r.type === 'edit' && o?.state === 'ok' && !r.deletedAt) edits.set(r.senderId + ':' + o.payload.ref, o.payload.body); }
+  const seen = new Set(rows.map((r) => r.clientId)); const pending = mine.pending || [];
+  // 1. classify every row into a note (system line), a message, or nothing
+  const list = [];
+  const add = (r, o, isPending) => {
+    const own = r.senderId === S.user.id, when = r.createdAt;
+    if (r.deletedAt) return list.push({ note: own ? 'You deleted this message' : 'This message was deleted', when });
+    if (!o) return list.push({ note: 'Opening…', when });
+    if (o.state === 'pending') return list.push({ note: 'Waiting for the secure session to start…', when });
+    if (o.state === 'dead') return list.push({ note: 'No longer readable. ' + (REASONS[o.reason] || ''), when });
+    if (o.state === 'failed') return list.push({ note: "This message couldn't be decrypted. " + (REASONS[o.reason] || ''), when });
     const p = o.payload; if (!p || p.t === 'ctl' || p.t === 'edit') return;
-    const edited = edits.get(r.senderId + ':' + r.clientId);
-    const body = p.t === 'text' ? [p.reply ? h('div', { class: 'quote' }, h('b', {}, p.reply.who), p.reply.snip) : null, edited ?? p.body] : mediaNode(p);
-    const bubble = h('div', { class: 'bubble' + (p.t !== 'text' ? ' media' : ''), tabIndex: 0, role: 'button', 'aria-label': 'Message actions', on: { click: () => openMsgMenu(r, p, edited ?? p.body), keydown: (e) => { if (e.key === 'Enter') openMsgMenu(r, p, edited ?? p.body); } } }, body);
-    nodes.push(h('div', { class: `msg ${own ? 'own' : 'peer'}` }, bubble, h('div', { class: 'meta' }, fmtClock(when), r.editedAt || edited ? 'edited' : null, own ? statusIcon(r, isPending) : null)));
+    list.push({ r, p, own, when, isPending, edited: edits.get(r.senderId + ':' + r.clientId) });
   };
-  for (const r of rows) place(r, mine.dec.get(r.id), false);
-  for (const it of pending) if (!seen.has(it.clientId) && it.payload && it.payload.t !== 'ctl' && it.payload.t !== 'edit') place({ id: it.clientId, clientId: it.clientId, senderId: S.user.id, createdAt: it.createdAt }, { state: 'ok', payload: it.payload }, true);
-  clear(mine.msgsEl).append(...nodes);
+  for (const r of rows) add(r, mine.dec.get(r.id), false);
+  for (const it of pending) if (!seen.has(it.clientId) && it.payload && it.payload.t !== 'ctl' && it.payload.t !== 'edit') add({ id: it.clientId, clientId: it.clientId, senderId: S.user.id, createdAt: it.createdAt }, { state: 'ok', payload: it.payload }, true);
+  // 2. group neighbours: same sender, close in time, no separator between them
+  const sepBefore = (i) => i === 0 || dayKey(list[i].when) !== dayKey(list[i - 1].when) || list[i].when - list[i - 1].when > SEP_MS;
+  const joined = (i, j) => list[i].p && list[j].p && list[i].own === list[j].own && !sepBefore(j) && list[j].when - list[i].when < GROUP_MS;
+  const nodes = [];
+  if (mine.cursor) nodes.push(h('button', { class: 'btn btn-sm more', on: { click: loadOlder } }, 'Load earlier messages'));
+  list.forEach((it, i) => {
+    if (sepBefore(i)) nodes.push(h('div', { class: 'day' }, `${fmtDay(it.when)} ${fmtClock(it.when)}`.toUpperCase()));
+    if (it.note) return nodes.push(h('div', { class: 'muted-row' }, it.note));
+    const first = !(i > 0 && joined(i - 1, i)), last = !(i < list.length - 1 && joined(i, i + 1));
+    const text = it.edited ?? it.p.body; const emojiOnly = it.p.t === 'text' && !it.p.reply && EMOJI_ONLY.test(String(text).trim());
+    const open = () => openMsgMenu(it.r, it.p, text);
+    const body = it.p.t === 'text' ? [it.p.reply ? h('div', { class: 'quote' }, h('b', {}, it.p.reply.who), it.p.reply.snip) : null, text] : it.p.t === 'audio' ? audioNode(it.p) : mediaNode(it.p);
+    const bubble = h('div', { class: 'bubble' + (it.p.t === 'audio' ? ' voice-bubble' : it.p.t !== 'text' ? ' media' : '') + (emojiOnly ? ' emoji-only' : ''), tabIndex: 0, role: 'button', 'aria-label': 'Message actions', on: { click: open, keydown: (e) => { if (e.key === 'Enter') open(); } } }, body);
+    const meta = last ? h('div', { class: 'meta' }, fmtClock(it.when), it.r.editedAt || it.edited ? 'edited' : null, it.own ? statusIcon(it.r, it.isPending) : null) : null;
+    const pos = first && last ? 'g-single' : first ? 'g-first' : last ? 'g-last' : 'g-mid';
+    const col = h('div', { class: 'col' }, bubble, meta);
+    const av = it.own ? null : last ? avatar(mine.conv.peer, 'xs') : h('span', { class: 'av-gap' });
+    nodes.push(h('div', { class: `msg ${it.own ? 'own' : 'peer'} ${pos}` }, av, col));
+  });
+  clear(mine.msgsEl).append(...nodes); updateVoiceUi();
   if (stick || wasBottom) mine.msgsEl.scrollTop = mine.msgsEl.scrollHeight;
   mine.ce.pendingOutbox().then((p) => { const changed = p.length !== (mine.pending || []).length; mine.pending = p; if (changed && C === mine) renderMsgs(false); });
 }
@@ -291,7 +380,7 @@ function renderMsgs(stick) {
 function mediaNode(p) {
   const wrap = h('button', { class: 'thumb-wrap', type: 'button', 'aria-label': p.t === 'image' ? 'Open photo' : 'Play video', on: { click: (e) => { e.stopPropagation(); openMedia(p); } } },
     h('img', { class: 'thumb', src: p.thumb || '', alt: p.t === 'image' ? 'Photo' : 'Video thumbnail', style: p.w && p.h ? { 'aspect-ratio': `${p.w} / ${p.h}` } : {} }),
-    p.t === 'video' ? h('div', { class: 'play' }, ic('lg'), p.duration ? `${Math.floor(p.duration / 60)}:${String(p.duration % 60).padStart(2, '0')}` : null) : null);
+    p.t === 'video' ? h('div', { class: 'play' }, svg('play', 30), p.duration ? `${Math.floor(p.duration / 60)}:${String(p.duration % 60).padStart(2, '0')}` : null) : null);
   return [wrap, p.caption ? h('div', { class: 'cap' }, p.caption) : null];
 }
 async function openMedia(p) {
@@ -300,7 +389,7 @@ async function openMedia(p) {
     try {
       const bytes = await C.ce.openMedia(p); const url = URL.createObjectURL(new Blob([bytes], { type: p.mime || 'application/octet-stream' }));
       clear(stage).append(p.t === 'video' ? h('video', { src: url, controls: true, autoplay: true, playsInline: true }) : h('img', { src: url, alt: 'Photo' }));
-      bar.append(h('a', { class: 'btn', href: url, download: p.name || 'duet-media' }, ic('md'), h('span', { class: 'label' }, 'Save')));
+      bar.append(h('a', { class: 'btn', href: url, download: p.name || 'duet-media' }, h('span', { class: 'label' }, 'Save')));
       const old = close; bar.querySelector('button').addEventListener('click', () => URL.revokeObjectURL(url)); void old;
     } catch { clear(stage).append(h('p', { style: { color: '#fff' } }, 'This attachment could not be opened.')); }
   });
@@ -312,19 +401,19 @@ function openMsgMenu(row, p, text) {
     const item = (label, fn, kind) => body.append(btn(label, { kind, onClick: () => { s.close(); fn(); } }));
     item('Reply', () => { C.ctx = { cid: row.clientId, who: own ? 'You' : C.conv.peer.displayName, snip: snippet(p) }; renderCtx(); C.ta.focus(); });
     if (p.t === 'text') item('Copy text', async () => { try { await navigator.clipboard.writeText(text); toast('Copied'); } catch { toast('Could not copy'); } });
-    if (own && p.t === 'text' && !row.id.includes('pending')) item('Edit', () => { C.ctx = { edit: row.clientId, snip: text }; C.ta.value = text; renderCtx(); C.ta.focus(); });
+    if (own && p.t === 'text' && !row.id.includes('pending')) item('Edit', () => { C.ctx = { edit: row.clientId, snip: text }; C.ta.value = text; C.syncSend(); renderCtx(); C.ta.focus(); });
     if (own) item('Delete', async () => { if (S.settings.confirmDelete && !(await confirmSheet('Delete message?', 'It will be removed for both of you. This cannot be undone.', 'Delete', { danger: true }))) return; try { await api.deleteMessage(row.id); row.deletedAt = Date.now(); renderMsgs(false); refreshList(); } catch (x) { toast(x.message); } }, 'danger');
   });
 }
 function renderCtx() {
   clear(C.ctxEl); if (!C.ctx) return;
-  C.ctxEl.append(h('div', { class: 'ctx' }, ic('xs'), h('div', { class: 'grow' }, h('b', {}, C.ctx.edit ? 'Editing message' : `Replying to ${C.ctx.who}`), h('div', { class: 'small muted' }, C.ctx.snip)),
-    btn('Cancel', { small: true, kind: 'quiet', onClick: () => { if (C.ctx.edit) C.ta.value = ''; C.ctx = null; renderCtx(); } })));
+  C.ctxEl.append(h('div', { class: 'ctx' }, h('div', { class: 'grow' }, h('b', {}, C.ctx.edit ? 'Editing message' : `Replying to ${C.ctx.who}`), h('div', { class: 'small muted' }, C.ctx.snip)),
+    btn('Cancel', { small: true, kind: 'quiet', onClick: () => { if (C.ctx.edit) { C.ta.value = ''; C.syncSend(); } C.ctx = null; renderCtx(); } })));
 }
 
 async function sendText() {
   if (!C || !C.ce.ready) return; const text = C.ta.value.trim(); if (!text) return;
-  const ctx = C.ctx; C.ta.value = ''; C.ta.style.height = 'auto'; C.ctx = null; renderCtx(); C.emojiOpen = false; renderEmoji();
+  const ctx = C.ctx; C.ta.value = ''; C.syncSend(); C.ctx = null; renderCtx(); C.emojiOpen = false; renderEmoji();
   try {
     if (ctx?.edit) await C.ce.send({ t: 'edit', ref: ctx.edit, body: text }, { type: 'edit', editsClientId: ctx.edit });
     else await C.ce.send({ t: 'text', body: text, ...(ctx?.cid ? { reply: ctx } : {}) });
@@ -446,3 +535,4 @@ function openChangePassword() {
       } } }, field('Current password', cur), field('New password (8+ characters)', n1), field('Repeat new password', n2), err, btn('Change password', { kind: 'primary', block: true, type: 'submit' })));
   });
 }
+

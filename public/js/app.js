@@ -87,7 +87,7 @@ function phoneScreen() {
   } } }, h('div', { class: 'phone-row' }, sel, num), pw, extra, err, go1);
   paint();
   if (!S.health) api.health().then((hh) => { S.health = hh; if (S.phase === 'phone') go('phone'); }).catch(() => {});
-  return h('div', { class: 'screen fill' }, logo('lg'), h('div', { class: 'stack' }, title, sub), form, swap, btn('Back', { kind: 'quiet', onClick: () => go('welcome') }));
+  return h('div', { class: 'screen fill' }, h('div', { class: 'stack' }, title, sub), form, swap, btn('Back', { kind: 'quiet', onClick: () => go('welcome') }));
 }
 
 function phoneOtpScreen() {
@@ -104,7 +104,7 @@ function phoneOtpScreen() {
     finally { busy(go1, false); }
   } } },
     h('div', { class: 'phone-row' }, sel, num), err, go1);
-  return h('div', { class: 'screen fill' }, logo('lg'), h('div', { class: 'stack' }, h('h2', {}, 'What is your number?'), h('p', { class: 'muted small' }, "We'll text you a 6-digit code. Standard message rates may apply.")), form,
+  return h('div', { class: 'screen fill' }, h('div', { class: 'stack' }, h('h2', {}, 'What is your number?'), h('p', { class: 'muted small' }, "We'll text you a 6-digit code. Standard message rates may apply.")), form,
     btn('Back', { kind: 'quiet', onClick: () => go('welcome') }));
 }
 
@@ -136,7 +136,7 @@ function profileScreen() {
   name.addEventListener('input', () => { if (!avatarData) clear(prev).append(avatar({ displayName: name.value || '?' }, 'lg')); });
   const err = errBox(); const save = btn('Continue', { kind: 'primary', block: true, type: 'submit' });
   return h('div', { class: 'screen fill' }, h('h2', {}, 'Set up your profile'), h('p', { class: 'muted small' }, 'This is what the other person sees. You can change it later.'),
-    h('div', { class: 'row-flex' }, prev, h('label', { class: 'btn btn-sm' }, ic('md'), h('span', { class: 'label' }, 'Choose picture (optional)'), file)),
+    h('div', { class: 'row-flex' }, prev, h('label', { class: 'btn btn-sm' }, h('span', { class: 'label' }, 'Choose picture (optional)'), file)),
     h('form', { class: 'stack', on: { submit: async (e) => {
       e.preventDefault(); err.textContent = ''; busy(save, true);
       try { const r = await api.updateProfile({ displayName: name.value, ...(avatarData !== S.user.avatar ? { avatar: avatarData } : {}) }); S.user = r.user; rememberUser(); await afterSignIn(false); }
@@ -163,7 +163,7 @@ function vaultSetup() {
     const pin = h('input', { class: 'input', type: 'password', autocomplete: 'new-password', placeholder: 'At least 6 characters', 'aria-label': 'New PIN or passphrase' });
     const pin2 = h('input', { class: 'input', type: 'password', autocomplete: 'new-password', placeholder: 'Repeat it', 'aria-label': 'Repeat PIN or passphrase' });
     const err = errBox(); const go1 = btn('Create vault', { kind: 'primary', block: true, type: 'submit' });
-    clear(wrap).append(logo('lg'), h('h2', {}, 'Protect Duet on this device'),
+    clear(wrap).append(h('h2', {}, 'Protect Duet on this device'),
       h('p', { class: 'muted small' }, 'A PIN or passphrase locks your keys and messages on this device. It is never stored or sent anywhere. A longer passphrase is stronger than a short PIN.'),
       h('form', { class: 'stack', on: { submit: async (e) => {
         e.preventDefault(); err.textContent = '';
@@ -187,7 +187,7 @@ function vaultSetup() {
   const step3 = async () => {
     if (!(await bioAvailable())) return finish();
     const err = errBox();
-    clear(wrap).append(logo('lg'), h('h2', {}, 'Unlock with biometrics?'), h('p', { class: 'muted small' }, 'Use your fingerprint or face to unlock. This uses a hardware-backed secret (WebAuthn PRF) that wraps your key a second time. Your PIN keeps working.'),
+    clear(wrap).append(h('h2', {}, 'Unlock with biometrics?'), h('p', { class: 'muted small' }, 'Use your fingerprint or face to unlock. This uses a hardware-backed secret (WebAuthn PRF) that wraps your key a second time. Your PIN keeps working.'),
       err, btn('Enable biometrics', { kind: 'primary', block: true, onClick: async () => { try { await enableBio(); finish(); } catch (x) { err.textContent = x.message === 'unsupported' ? 'This device or browser cannot protect keys with biometrics, so Duet will use your PIN only.' : 'Biometric setup was cancelled.'; } } }),
       btn('Not now', { kind: 'quiet', block: true, onClick: finish }));
   };

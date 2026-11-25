@@ -8,6 +8,8 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
+/** Supabase's new `sb_secret_...` keys are not JWTs and must go in `apikey` only; the legacy service_role JWT goes in both. */
+export const authHeaders = (key) => (String(key).startsWith('sb_secret_') ? { apikey: key } : { apikey: key, authorization: `Bearer ${key}` });
 const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 export const emptyDb = () => ({ secret: crypto.randomBytes(32).toString('hex'), users: [], sessions: [], otp: [], invites: [], conversations: [], connections: [], messages: [], media: [], keys: {}, push: [], vapid: null });
 
@@ -53,7 +55,7 @@ export class SupabaseStore {
     this.d = emptyDb(); this.snap = new Map(); this.timer = null; this.running = null; this.dirty = false; this.failures = 0; this.lastError = null;
   }
   async _rest(method, pathq, body, extraHeaders = {}) {
-    const res = await fetch(`${this.base}/rest/v1/${pathq}`, { method, headers: { apikey: this.key, authorization: `Bearer ${this.key}`, 'content-type': 'application/json', ...extraHeaders }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const res = await fetch(`${this.base}/rest/v1/${pathq}`, { method, headers: { ...authHeaders(this.key), 'content-type': 'application/json', ...extraHeaders }, body: body === undefined ? undefined : JSON.stringify(body) });
     if (!res.ok) { const t = await res.text().catch(() => ''); throw new Error(`Supabase ${method} ${pathq.split('?')[0]} -> ${res.status} ${t.slice(0, 200)}`); }
     return res.status === 204 ? null : res.json().catch(() => null);
   }
@@ -129,7 +131,7 @@ export class SupabaseStore {
 
 export class SupabaseBlobs {
   constructor(url, serviceKey, bucket) { this.kind = 'supabase-storage'; this.base = url.replace(/\/+$/, ''); this.key = serviceKey; this.bucket = bucket; }
-  _h(extra = {}) { return { apikey: this.key, authorization: `Bearer ${this.key}`, ...extra }; }
+  _h(extra = {}) { return { ...authHeaders(this.key), ...extra }; }
   _u(id) { return `${this.base}/storage/v1/object/${this.bucket}/${encodeURIComponent(id)}`; }
   async put(id, buf) {
     const res = await fetch(this._u(id), { method: 'POST', headers: this._h({ 'content-type': 'application/octet-stream', 'x-upsert': 'true' }), body: buf });

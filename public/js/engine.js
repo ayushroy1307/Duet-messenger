@@ -436,12 +436,12 @@ export class ConvEngine extends Emitter {
   }
 
   // -- media -----------------------------------------------------------------------------
-  async sendMedia({ kind, bytes, mime, name, w, h, thumb, caption, duration }) {
+  async sendMedia({ kind, bytes, mime, name, w, h, thumb, caption, duration, wave }) {
     await this.load();
     if (!this.ready) throw new CryptoError('not-ready', this.status);
     const { key, blob } = await encryptBlob(bytes);
     const { id } = await this.e.api.uploadMedia(this.convId, blob, kind);
-    const payload = { t: kind, mediaId: id, key, mime, name, size: bytes.length, w, h, thumb, caption: caption || '', duration: duration || 0 };
+    const payload = { t: kind, mediaId: id, key, mime, name, size: bytes.length, w, h, thumb, caption: caption || '', duration: duration || 0, ...(wave ? { wave } : {}) };
     return this.send(payload, { type: kind, mediaId: id, mediaMeta: { size: blob.length } });
   }
   async openMedia(payload) {
